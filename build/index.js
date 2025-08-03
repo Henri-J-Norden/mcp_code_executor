@@ -855,24 +855,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
     console.error(` Info: Starting MCP Server with ${ENV_CONFIG.type} environment`);
     console.error(`Info: Code storage directory: ${CODE_STORAGE_DIR}`);
-    
     const app = express();
     app.use(express.json());
-    
     // Map to store transports by session ID
     const transports = {};
-    
     // Handle POST requests for client-to-server communication
     app.post('/mcp', async (req, res) => {
         try {
             // Check for existing session ID
             const sessionId = req.headers['mcp-session-id'];
             let transport;
-            
             if (sessionId && transports[sessionId]) {
                 // Reuse existing transport
                 transport = transports[sessionId];
-            } else {
+            }
+            else {
                 // Create new transport
                 transport = new StreamableHTTPServerTransport({
                     sessionIdGenerator: () => randomUUID(),
@@ -883,21 +880,19 @@ async function main() {
                     enableDnsRebindingProtection: true,
                     allowedHosts: ['127.0.0.1', 'localhost'],
                 });
-                
                 // Clean up transport when closed
                 transport.onclose = () => {
                     if (transport.sessionId) {
                         delete transports[transport.sessionId];
                     }
                 };
-                
                 // Connect to the MCP server
                 await server.connect(transport);
             }
-            
             // Handle the request
             await transport.handleRequest(req, res, req.body);
-        } catch (error) {
+        }
+        catch (error) {
             console.error('Error handling MCP request:', error);
             if (!res.headersSent) {
                 res.status(500).json({
@@ -911,7 +906,6 @@ async function main() {
             }
         }
     });
-    
     // Handle GET requests for server-to-client notifications via SSE
     app.get('/mcp', async (req, res) => {
         const sessionId = req.headers['mcp-session-id'];
@@ -922,7 +916,6 @@ async function main() {
         const transport = transports[sessionId];
         await transport.handleRequest(req, res);
     });
-    
     // Handle DELETE requests for session termination
     app.delete('/mcp', async (req, res) => {
         const sessionId = req.headers['mcp-session-id'];
@@ -933,14 +926,12 @@ async function main() {
         const transport = transports[sessionId];
         await transport.handleRequest(req, res);
     });
-    
     const PORT = 3000;
     app.listen(PORT, '127.0.0.1', () => {
         console.error(`MCP Server listening on http://127.0.0.1:${PORT}/mcp`);
         console.error('Server is ready to accept connections');
     });
 }
-
 main().catch((error) => {
     console.error("Server error:", error);
     process.exit(1);
