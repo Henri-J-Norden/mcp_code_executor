@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
+import express from 'express';
 import { join } from 'path';
 import { mkdir, writeFile, appendFile, readFile, access } from 'fs/promises';
 import { exec } from 'child_process';
@@ -849,14 +850,97 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 });
 /**
- * Start the server using stdio transport.
+ * Start the server using HTTP transport on port 3000.
  */
 async function main() {
     console.error(` Info: Starting MCP Server with ${ENV_CONFIG.type} environment`);
     console.error(`Info: Code storage directory: ${CODE_STORAGE_DIR}`);
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
+    
+    const app = express();
+    app.use(express.json());
+    
+    // Map to store transports by session ID
+    const transports = {};
+    
+    // Handle POST requests for client-to-server communication
+    app.post('/mcp', async (req, res) => {
+        try {
+            // Check for existing session ID
+            const sessionId = req.headers['mcp-session-id'];
+            let transport;
+            
+            if (sessionId && transports[sessionId]) {
+                // Reuse existing transport
+                transport = transports[sessionId];
+            } else {
+                // Create new transport
+                transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: () => randomUUID(),
+                    onsessioninitialized: (sessionId) => {
+                        // Store the transport by session ID
+                        transports[sessionId] = transport;
+                    },
+                    enableDnsRebindingProtection: true,
+                    allowedHosts: ['127.0.0.1', 'localhost'],
+                });
+                
+                // Clean up transport when closed
+                transport.onclose = () => {
+                    if (transport.sessionId) {
+                        delete transports[transport.sessionId];
+                    }
+                };
+                
+                // Connect to the MCP server
+                await server.connect(transport);
+            }
+            
+            // Handle the request
+            await transport.handleRequest(req, res, req.body);
+        } catch (error) {
+            console.error('Error handling MCP request:', error);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32603,
+                        message: 'Internal server error',
+                    },
+                    id: null,
+                });
+            }
+        }
+    });
+    
+    // Handle GET requests for server-to-client notifications via SSE
+    app.get('/mcp', async (req, res) => {
+        const sessionId = req.headers['mcp-session-id'];
+        if (!sessionId || !transports[sessionId]) {
+            res.status(400).send('Invalid or missing session ID');
+            return;
+        }
+        const transport = transports[sessionId];
+        await transport.handleRequest(req, res);
+    });
+    
+    // Handle DELETE requests for session termination
+    app.delete('/mcp', async (req, res) => {
+        const sessionId = req.headers['mcp-session-id'];
+        if (!sessionId || !transports[sessionId]) {
+            res.status(400).send('Invalid or missing session ID');
+            return;
+        }
+        const transport = transports[sessionId];
+        await transport.handleRequest(req, res);
+    });
+    
+    const PORT = 3000;
+    app.listen(PORT, '127.0.0.1', () => {
+        console.error(`MCP Server listening on http://127.0.0.1:${PORT}/mcp`);
+        console.error('Server is ready to accept connections');
+    });
 }
+
 main().catch((error) => {
     console.error("Server error:", error);
     process.exit(1);
