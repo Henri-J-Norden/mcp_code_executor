@@ -878,7 +878,6 @@ async function main() {
                         transports[sessionId] = transport;
                     },
                     enableDnsRebindingProtection: true,
-                    allowedHosts: ['127.0.0.1', 'localhost'],
                 });
                 // Clean up transport when closed
                 transport.onclose = () => {
@@ -927,8 +926,8 @@ async function main() {
         await transport.handleRequest(req, res);
     });
     const PORT = 3000;
-    app.listen(PORT, '127.0.0.1', () => {
-        console.error(`MCP Server listening on http://127.0.0.1:${PORT}/mcp`);
+    app.listen(PORT, '0.0.0.0', () => {
+        console.error(`MCP Server listening on http://0.0.0.0:${PORT}/mcp`);
         console.error('Server is ready to accept connections');
     });
 }
